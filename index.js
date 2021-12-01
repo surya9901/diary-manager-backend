@@ -210,6 +210,113 @@ app.get("/userName", [authenticate], async (req, res) => {
     }
 })
 
+const contactEmail = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: `${process.env.USER_NAME}`,
+        pass: `${process.env.PASSWORD}`,
+    },
+});
+
+contactEmail.verify((error) => {
+    if (error) {
+        console.log(error);
+    } else {
+        console.log("Ready to Send");
+    }
+});
+
+app.post("/forgot-password-email", async (req, res) => {
+    let resetPin = (Math.floor(100000 + Math.random() * 900000))
+    try {
+        let client = await mongoClient.connect(url)
+        let db = client.db("diary_manager")
+        let data = await db.collection("users").findOneAndUpdate({ email: req.query.q }, { $set: { PIN: resetPin } })
+        if (data.value) {
+            const message = resetPin;
+            const mail = {
+                from: `E-diary <${process.env.USER_NAME}>`,
+                to: req.query.q,
+                subject: "E-Diary Password Reset OTP",
+                html:
+                    `<h2>Hi User, This is your reset pin ${message}</h2>`
+            };
+            contactEmail.sendMail(mail, (error) => {
+                if (error) {
+                    res.json({ status: "ERROR" });
+                } else {
+                    res.json({ status: "Message Sent" });
+                }
+            });
+            await client.close()
+        } else {
+            res.status(404).json({
+                message: "No user Found!"
+            })
+        }
+    } catch (error) {
+        res.status(500).json({
+            message: "No user ID found"
+        })
+    }
+});
+
+app.post("/verify-otp", async (req, res) => {
+    try {
+        const client = await mongoClient.connect(url)
+        const db = client.db("diary_manager")
+        const data = await db.collection("users").findOne({ email: req.body.email })
+        if (data) {
+            if (data.PIN == req.body.PIN) {
+                await db.collection("users").findOneAndUpdate({ email: data.email }, { $set: { PIN: "" } })
+                await client.close()
+                res.json({
+                    message: "Success"
+                })
+            } else {
+                res.status(402).json({
+                    message: "Invalid OTP"
+                })
+            }
+        } else {
+            res.status(500).json({
+                message: "To much Traffic"
+            })
+        }
+    } catch (error) {
+        res.status(500).json({
+            message: "To much Traffic"
+        })
+    }
+})
+
+app.post("/new-pass-word", async (req, res) => {
+    try {
+        let client = await mongoClient.connect(url)
+        let db = client.db("diary_manager")
+        let data = await db.collection("users").findOne({ "email": `${req.body.email}` })
+        if (data) {
+            let salt = bcryptjs.genSaltSync(10);
+            let hash = bcryptjs.hashSync(req.body.password, salt);
+            req.body.password = hash;
+            await db.collection("users").findOneAndUpdate({ email: data.email }, { $set: { password: req.body.password } })
+            await client.close()
+            res.json({
+                message: "Password updated",
+            })
+        } else {
+            await client.close()
+            res.status(500).json({
+                message: "Something went wrong"
+            })
+        }
+    } catch (error) {
+        res.status(500).json({
+            message: "something went wrong"
+        })
+    }
+})
+
 app.listen(port, () => {
     console.log(`this app is listening to ${port}`)
 })
